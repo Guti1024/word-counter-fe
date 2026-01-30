@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Word Counter</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Arial; margin: 24px; }
+        .row { margin: 12px 0; }
+        textarea { width: 100%; height: 140px; }
+        input[type="text"] { width: 100%; padding: 8px; }
+        button { padding: 10px 14px; cursor: pointer; }
+        pre { background: #f6f6f6; padding: 12px; overflow: auto; }
+        .hint { color: #666; font-size: 13px; }
+    </style>
+</head>
+<body>
+<h2>단어 등장 횟수 카운터</h2>
+
+<div class="row">
+    <label><b>파일 업로드</b></label><br />
+    <input id="fileInput" type="file" accept=".txt" />
+    <div class="hint">txt 파일을 선택하면 아래 텍스트 영역이 자동으로 채워져.</div>
+</div>
+
+<div class="row">
+    <label><b>기준 텍스트</b></label><br />
+    <textarea id="textArea" placeholder="여기에 텍스트를 붙여넣어도 돼"></textarea>
+</div>
+
+<div class="row">
+    <label><b>검색 단어(쉼표로 구분, 비우면 전체 토큰 중 최다 등장)</b></label><br />
+    <input id="termsInput" type="text" placeholder='예: hello_world, qa, world' />
+</div>
+
+<div class="row">
+    <button id="runBtn">실행</button>
+</div>
+
+<div class="row">
+    <label><b>출력(JSON)</b></label>
+    <pre id="output">{}</pre>
+</div>
+
+<script>
+    const fileInput = document.getElementById("fileInput");
+    const textArea = document.getElementById("textArea");
+    const termsInput = document.getElementById("termsInput");
+    const runBtn = document.getElementById("runBtn");
+    const output = document.getElementById("output");
+
+    function jsonPrint(obj) {
+        const keys = Object.keys(obj);
+        output.textContent = (keys.length >= 2)
+            ? JSON.stringify(obj, null, 2)
+            : JSON.stringify(obj);
+    }
+
+    // ✅ token 규칙: 특수문자/숫자가 "사이에" 들어간 형태는 하나의 토큰으로 취급
+    // 예: hello-world, hello1world => 토큰 "hello-world", "hello1world" (hello로 매칭 X)
+    const TOKEN_PATTERN = /[0-9A-Za-z가-힣]+(?:[^\s0-9A-Za-z가-힣]+[0-9A-Za-z가-힣]+)*/g;
+    const TOPWORD_PATTERN = /[0-9A-Za-z가-힣]+/g;
+
+    function countTermsInText(text, terms) {
+        const lowerText = (text ?? "").toLowerCase();
+
+        const tokens = lowerText.match(TOKEN_PATTERN) || [];
+        const counter = new Map();
+        for (const t of tokens) counter.set(t, (counter.get(t) || 0) + 1);
+
+        const out = {};
+        for (const original of terms) {
+            const term = (original || "").trim().toLowerCase();
+            if (!term) continue;
+
+            if (term.includes(" ")) {
+                // 공백 포함 구문: "정확히 동일한 구문"만 매칭 (공백 단위)
+                const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                const re = new RegExp(`(?<!\\S)${escaped}(?!\\S)`, "g");
+                out[original] = (lowerText.match(re) || []).length;
+            } else {
+                out[original] = counter.get(term) || 0;
+            }
+        }
+        return out;
+    }
+
+    function countTopWords(text) {
+        const tokens = ((text ?? "").toLowerCase().match(TOPWORD_PATTERN)) || [];
+        if (tokens.length === 0) return {};
+        const c = new Map();
+        for (const t of tokens) c.set(t, (c.get(t) || 0) + 1);
+        let maxCnt = 0;
+        for (const v of c.values()) maxCnt = Math.max(maxCnt, v);
+
+        const winners = [];
+        for (const [k, v] of c.entries()) if (v === maxCnt) winners.push(k);
+        winners.sort(); // ✅ 가나다/abc
+        const out = {};
+        for (const k of winners) out[k] = c.get(k);
+        return out;
+    }
+
+    function buildResult(text, terms) {
+        if (!text || text.trim() === "") return { error: "문자가 없습니다" };
+
+        const hasTerms = terms && terms.some(t => (t || "").trim() !== "");
+        if (hasTerms) {
+            const counts = countTermsInText(text, terms);
+            const keys = Object.keys(counts);
+            if (keys.length === 0) return { error: "문자가 없습니다" };
+
+            let maxCnt = 0;
+            for (const k of keys) maxCnt = Math.max(maxCnt, counts[k]);
+
+            const tied = keys.filter(k => counts[k] === maxCnt).sort(); // ✅ 가나다/abc
+            const out = {};
+            for (const k of tied) out[k] = counts[k];
+            return out;
+        }
+
+        return countTopWords(text);
+    }
+
+    fileInput.addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        textArea.value = text;
+    });
+
+    runBtn.addEventListener("click", () => {
+        const baseText = textArea.value || "";
+        const rawTerms = (termsInput.value || "").trim();
+        const terms = rawTerms ? rawTerms.split(",").map(s => s.trim()) : [];
+        const result = buildResult(baseText, terms);
+        jsonPrint(result);
+    });
+
+    // 기본 텍스트
+    textArea.value = `Hello hello world!
+QA qa QA.
+Hello-world? world.
+hello_world hello-world hello1world hello world
+hello_world hello-world hello1world hello world
+hello_world hello-world hello1world hello world
+hello_world hello-world hello1world hello world`;
+</script>
+</body>
+</html>
